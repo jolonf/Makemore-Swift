@@ -9,7 +9,15 @@
 			<string>import Foundation
 import SwiftUI
 
-let contents = try! String(contentsOf: URL(string: "https://raw.githubusercontent.com/karpathy/makemore/master/names.txt")!)
+/**
+ An implementation of the Makemore Bigram model from
+ Andrej Karpathy's video: https://youtu.be/PaCmpygFfXo
+ */
+
+// names.txt
+let fileURL = #fileLiteral(resourceName: "names.txt")
+
+let contents = try! String(contentsOf: fileURL)
 
 let words = contents.components(separatedBy: .newlines)
 
@@ -68,6 +76,7 @@ func multinomial(_ p: [Double]) -&gt; Int {
     return p.count - 1
 }
 
+// Generate names
 for _ in 0..&lt;20 { 
     var ix = 0
     var out = ""
@@ -85,7 +94,7 @@ for _ in 0..&lt;20 {
 }
 </string>
 			<key>ModifiedRange</key>
-			<string>{0, 1733}</string>
+			<string>{0, 1859}</string>
 			<key>OriginalContent</key>
 			<string></string>
 			<key>OriginalRange</key>

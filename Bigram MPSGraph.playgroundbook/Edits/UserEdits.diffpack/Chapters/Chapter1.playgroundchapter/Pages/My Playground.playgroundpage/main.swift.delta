@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Diff</key>
+	<array>
+		<dict>
+			<key>ModifiedContent</key>
+			<string>import MetalPerformanceShadersGraph
+import TrainingData
+
+let device = MTLCreateSystemDefaultDevice()!
+
+// --- LOAD DATA ---
+
+let text = Shakespeare.text
+
+let vocab = Array(Set(text.map { $0 })).sorted()
+let vocabSize = vocab.count
+
+print(vocabSize)
+print(vocab)
+
+// Flip the keys and values to convert from chars to indexes
+let stoi: [Character: UInt8] = Dictionary(uniqueKeysWithValues: 
+                                        vocab.enumerated()
+                                        .map( { k, v in (v, UInt8(k)) } ))
+
+print(stoi)
+
+let encode = { (string: String) -&gt; [UInt8] in 
+    string.map { stoi[$0]! } }
+
+let decode = { (indices: [UInt8]) -&gt; String in
+    String(indices.map { vocab[Int($0)] } )
+}
+
+print(encode("HI there!!!"))
+print(decode(encode("HI there!!!")))
+
+let data: [UInt8] = encode(text)
+
+let n = Int(0.9 * Double(data.count))
+
+let trainData = data[..&lt;n]
+let valData = data[n...]
+
+//print(valData)
+
+let batchSize = 4
+let blockSize = 8
+
+//let x = trainData[..&lt;blockSize]
+//let y = Array(trainData[1...blockSize])
+//
+//for t in 0..&lt;blockSize {
+//    let context = x[...t]
+//    let target = y[t]
+//    print("When input is \(context), the target is \(target)")
+//}
+
+// Gets a batch of data from the training or testing set split
+func getBatch(_ split: String) -&gt; ([UInt8], [UInt8]) {
+    let data = split == "train" ? trainData : valData
+    
+    // Randomly pick a starting index in the data set for each batch
+    let ix = (0..&lt;batchSize).map { _ in Int.random(in: 0..&lt;data.count - blockSize) }
+    // Grab the input data for each batch
+    var x = Array(ix.map { data[$0 ..&lt; ($0 + blockSize)] }.joined())
+    // Grab the target data for each batch
+    var y = Array(ix.map { data[($0 + 1) ..&lt; ($0 + blockSize + 1)] }.joined())
+
+    return (x, y)
+}
+
+let (xb, yb) = getBatch("train")
+
+xb
+yb
+
+print(xb)
+print(yb)
+
+// Convert a training batch to MPSGraphTensorData
+func arrayToMPSTensorData&lt;T&gt;(array: Array&lt;T&gt;, 
+                             dataType: MPSDataType, 
+                             shape: [NSNumber]) -&gt; MPSGraphTensorData {
+    var source = array // we need a var for writeBytes
+    let mpsNDArray = MPSNDArray(device: device,
+                                descriptor: MPSNDArrayDescriptor(dataType: dataType, 
+                                                                 shape: shape))
+    
+    mpsNDArray.writeBytes(&amp;source, strideBytes: nil)
+    
+    return MPSGraphTensorData(mpsNDArray)
+    
+}
+
+// Get a batch in MPSGraph format
+func getMPSBatch(_ split:String) -&gt; (MPSGraphTensorData, MPSGraphTensorData) {
+    var (xb, yb) = getBatch(split)
+    
+    let inputTensorData = arrayToMPSTensorData(array: xb, 
+                                               dataType: .uInt8, 
+                                               shape: [batchSize as NSNumber, 
+                                                       blockSize as NSNumber])
+    
+    let targetTensorData = arrayToMPSTensorData(array: yb, 
+                                               dataType: .uInt8, 
+                                               shape: [batchSize as NSNumber, 
+                                                       blockSize as NSNumber])
+    
+    return (inputTensorData, targetTensorData)
+}
+
+
+//print(data)
+
+let embeddingSize = vocabSize
+
+let graph = MPSGraph()
+
+// --- BUILD NN ----
+
+// --- Forward ---
+
+// Placeholders
+
+let inputPlaceholderTensor = graph.placeholder(
+    shape: [-1, // batchSize
+            blockSize as NSNumber], 
+    dataType: .uInt8, name: "Input Indices")
+
+let targetsPlaceholderTensor = graph.placeholder(
+    shape: [-1, // batchSize
+            blockSize as NSNumber], 
+    dataType: .uInt8, name: "Target Indices")
+
+// Convert to one-hot
+
+// [batchSize, blockSize, vocabSize]
+let inputOneHot = graph.oneHot(
+    withIndicesTensor: inputPlaceholderTensor, 
+    depth: vocabSize, 
+    name: "Input OneHot Encoded")
+
+// [batchSize, blockSize, vocabSize]
+let targetsOneHot = graph.oneHot(
+    withIndicesTensor: targetsPlaceholderTensor, 
+    depth: vocabSize, 
+    name: "Targets OneHot Encoded")
+
+// Embedding layer
+
+let embeddingWeightsValues = (0..&lt;(vocabSize * embeddingSize))
+    .map { _ in Float.random(in: -0.2..&lt;0.2) }
+
+let embeddingWeights = graph.variable(with: Data(bytes: embeddingWeightsValues, 
+                                                 count: vocabSize * embeddingSize * 4), 
+                                      shape: [vocabSize as NSNumber, 
+                                              embeddingSize as NSNumber], 
+                                      dataType: .float32, 
+                                      name: "Embedding Weights")
+
+let logits = graph.matrixMultiplication(
+    primary: inputOneHot, 
+    secondary: embeddingWeights, 
+    name: "Logits")
+
+// Only used for inference
+let softMax = graph.softMax(with: logits, axis: -1, name: "softMax")
+
+// --- Loss ---
+
+// Only used for training
+let loss = graph.softMaxCrossEntropy(
+    logits, // Should this be reshaped to 2D matrix ??
+    labels: targetsOneHot, // ?? e.g. [batchSize * blockSize, vocabSize]
+    axis: -1, // Hope this gets the correct axis!!
+    reuctionType: .mean, 
+    name: "Loss: SoftMax Cross Entropy")
+
+// --- Backprop ---
+
+let gradients = graph.gradients(of: loss, with: [embeddingWeights], name: "Gradients")
+
+let learningRate = graph.constant(0.1, dataType: .float32)
+
+var targetOps: [MPSGraphOperation] = []
+
+for (tensor, gradient) in gradients {
+    let newTensor = graph.stochasticGradientDescent(
+        learningRate: learningRate, 
+        values: tensor, 
+        gradient: gradient, 
+        name: "SGD")
+    
+    targetOps += [graph.assign(tensor, tensor: newTensor, name: "Assign")]
+}
+
+
+// --- TRAIN ---
+
+for epoch in 1...10000 {
+
+    autoreleasepool {
+        let (input, target) = getMPSBatch("train")
+
+        // Feeds: Placeholders
+        // Target tensors: Loss
+        // Target operations: []
+        let results = graph.run(feeds: [inputPlaceholderTensor: input, 
+                                        targetsPlaceholderTensor: target], 
+                                targetTensors: [loss], 
+                                targetOperations: targetOps)
+
+        // Get the loss results
+        let lossData = results[loss]
+
+        var lossValue: Float = 0
+
+        lossData?.mpsndarray().readBytes(&amp;lossValue, strideBytes: nil)
+
+        if epoch % 100 == 0 {
+            print("\(epoch). loss = \(lossValue)")
+        }
+    }
+
+}
+
+// --- GENERATE ---
+
+func multinomial(_ p: [Float]) -&gt; Int {
+    let r = Float.random(in: 0..&lt;1)
+    var acc = Float(0)
+    for i in 0..&lt;p.count {
+        acc += p[i]
+        if r &lt; acc {
+            return i
+        }
+    }
+    return p.count - 1
+}
+
+// Start with all zeroes
+var indicesBlock = Array(repeating: UInt8(0), count: blockSize)
+var generatedIndices: [UInt8] = []
+
+for _ in 1...100 {
+    autoreleasepool {
+        let inputTensorData = arrayToMPSTensorData(array: indicesBlock, 
+                                                   dataType: .uInt8, 
+                                                   shape: [1 as NSNumber, // batchSize
+                                                           blockSize as NSNumber])
+        
+        let results = graph.run(feeds: [inputPlaceholderTensor: inputTensorData],
+                                targetTensors: [softMax],
+                                targetOperations: [])
+        
+        // Get the softMax results
+        let softMaxData = results[softMax]
+        
+        //print(softMaxData)
+        
+        var softMaxArray = Array(repeating: Float(0), count: blockSize * vocabSize)
+        
+        softMaxData?.mpsndarray().readBytes(&amp;softMaxArray, strideBytes: nil)
+        
+        // We only want the last block/time
+        let softMaxLast = Array(softMaxArray[((blockSize - 1) * vocabSize) ..&lt; (vocabSize * blockSize)])
+        
+        //print(softMaxLast)
+        
+        let index = multinomial(softMaxLast)
+        
+        //print("index \(index)")
+        
+        indicesBlock = indicesBlock.dropFirst() + [UInt8(index)]
+        
+        generatedIndices += [UInt8(index)]
+    }
+}
+
+let generatedString = decode(generatedIndices)
+
+print("Generated string:")
+print(generatedString)
+</string>
+			<key>ModifiedRange</key>
+			<string>{1, 8186}</string>
+			<key>OriginalContent</key>
+			<string></string>
+			<key>OriginalRange</key>
+			<string>{1, 0}</string>
+		</dict>
+	</array>
+	<key>File</key>
+	<string>Chapters/Chapter1.playgroundchapter/Pages/My Playground.playgroundpage/main.swift</string>
+</dict>
+</plist>

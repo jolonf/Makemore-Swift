@@ -1,5 +1,9 @@
 import SwiftUI
 
+/**
+ An implementation of the Makemore Bigram model from
+ Andrej Karpathy's video: https://youtu.be/PaCmpygFfXo
+ */
 func makemore() -> ([[Int]], [String]) {
     
     // Load names file as a string
@@ -11,15 +15,15 @@ func makemore() -> ([[Int]], [String]) {
     // Join all the words back together, convert each char to a string, add to set to find out which chars are in the file, sort, add a "." at the start which will be used as a token to represent the start and end of words
     let chars = ["."] + Array(Set(words.joined().map {String($0)})).sorted()
     
-    // Bigram matrix
-    var N = [[Int]](repeating: [Int](repeating: 0, count: chars.count), count: chars.count)
-    
     // String to Index lookup
     let stoi: [String:Int] = chars.enumerated().reduce(into: [:]) { (result, element) in
         let (i, s) = element
         result[s] = i
     }
     
+    // Bigram matrix
+    var N = [[Int]](repeating: [Int](repeating: 0, count: chars.count), count: chars.count)
+
     // Create the bigram matrix
     for w in words {
         let chs = "." + w + "."
