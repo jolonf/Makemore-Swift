@@ -13,9 +13,10 @@ The playground book format makes it easier to inspect the variables however it i
 
 | Video link | Playground  | Description |
 |-------|-------------|-------------|
-| [Video 2](https://youtu.be/PaCmpygFfXo) | Bigram.playgroundbook | An implementation of the Bigram model from video 2 using `names.txt`. This is a playground with no gui. |
+| [Video 2](https://youtu.be/PaCmpygFfXo) | Bigram.playgroundbook | An implementation of the Bigram model from part 1 of video 2 using `names.txt`. This is a playground with no gui. |
 | [Video 2](https://youtu.be/PaCmpygFfXo) | Bigram GUI.swiftpm | As above but implemented with a GUI using SwiftUI |
-| [Video 5](https://www.youtube.com/watch?v=kCc8FmEb1nY) | Bigram MPSGraph.playgroundbook | The shakespeare bigram model from video 5 implemented using MPSGraph (Metal) |
+| [Video 2](https://youtu.be/PaCmpygFfXo) | Makemore MLP GUI.swiftpm | From part 2 of video 2, an MLP implemented using MPSGraph. |
+| [Video 5](https://www.youtube.com/watch?v=kCc8FmEb1nY) | Bigram MPSGraph.playgroundbook | The shakespeare bigram model from video 5 implemented using MPSGraph |
 | [Video 5](https://www.youtube.com/watch?v=kCc8FmEb1nY) | Bigram MPSGraph GUI.swiftpm | As above but with a GUI |
 -------
 
